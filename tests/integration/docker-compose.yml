@@ -1,0 +1,17 @@
+services:
+  upstream:
+    image: python:3.13-alpine
+    command: ["python", "-I", "/mock/mock_upstream.py"]
+    volumes:
+      - ./mock_upstream.py:/mock/mock_upstream.py:ro
+      - ../fixtures:/fixtures:ro
+
+  proxy:
+    image: ${PROXY_IMAGE:-eodhp-element84-proxy:dev}
+    environment:
+      PLATFORM_URL: https://hub.example
+      UPSTREAM_URL: http://upstream:8080
+    ports:
+      - "127.0.0.1:18000:8000"
+    depends_on:
+      - upstream

@@ -1,0 +1,54 @@
+# Rendered at container start by the image's entrypoint (envsubst). Only PLATFORM_URL and
+# UPSTREAM_URL are substituted (NGINX_ENVSUBST_FILTER in the Dockerfile), so nginx's own
+# $variables are left alone.
+
+server {
+  listen 8000;
+  server_name _;
+
+  # Item, item collection and search responses are rewritten in njs (njs/stac.js), which
+  # reads the whole upstream response. A Landsat item is about 20 KB, so a page of 250
+  # items is about 5.6 MB.
+  subrequest_output_buffer_size 32m;
+  # A POST /search body is read into memory, so njs can forward it.
+  client_body_buffer_size 64k;
+  client_max_body_size 64k;
+
+  location = /healthz {
+    access_log off;
+    default_type text/plain;
+    return 200 "ok\n";
+  }
+
+  location ~ ^/api/catalogue/stac/catalogs/public/catalogs/element84/(search|collections/[^/]+/items(/[^/]+)?)$ {
+    js_content stac.handle;
+  }
+
+  # Reached only by the njs subrequest above.
+  location /_upstream/ {
+    internal;
+    rewrite ^/_upstream/api/catalogue/stac/catalogs/public/catalogs/element84/(.*)$ /v1/$1 break;
+    include /etc/nginx/conf.d/upstream.inc;
+  }
+
+  location / {
+    # The ingress forwards the full platform path. Earth Search serves its STAC API under
+    # /v1, so "<mount>/collections" reaches the upstream as "/v1/collections".
+    rewrite ^/api/catalogue/stac/catalogs/public/catalogs/element84/(.*)$ /v1/$1 break;
+    include /etc/nginx/conf.d/upstream.inc;
+
+    proxy_redirect ~^https://earth-search\.aws\.element84\.com/v1(.*)$ ${PLATFORM_URL}/api/catalogue/stac/catalogs/public/catalogs/element84$1;
+
+    sub_filter_once off;
+    sub_filter_types
+      application/json
+      application/geo+json
+      application/schema+json
+      application/vnd.oai.openapi+json
+      application/openapi+json
+      application/vnd.oai.openapi
+      application/yaml
+      text/json;
+    sub_filter 'https://earth-search.aws.element84.com/v1' '${PLATFORM_URL}/api/catalogue/stac/catalogs/public/catalogs/element84';
+  }
+}
